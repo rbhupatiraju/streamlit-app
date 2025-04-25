@@ -1,0 +1,221 @@
+import streamlit as st
+import PyPDF2
+from io import BytesIO
+import base64
+import fitz  # PyMuPDF
+
+st.set_page_config(layout="wide")
+
+def is_likely_table(blocks, current_block):
+    """Check if a block is likely part of a table based on its alignment with other blocks"""
+    x0, y0, x1, y1, text, block_no, block_type = current_block
+    
+    # Skip blocks that are likely paragraphs (too much text or too wide)
+    text_length = len(text.strip())
+    block_width = x1 - x0
+    if text_length > 200 or block_width > 400:  # Skip long text blocks
+        return False
+    
+    # Count aligned blocks in columns and rows
+    vertical_alignments = 0
+    horizontal_alignments = 0
+    nearby_blocks = 0
+    
+    for other in blocks:
+        if other == current_block:
+            continue
+        
+        ox0, oy0, ox1, oy1, otext, oblock_no, oblock_type = other
+        
+        # Check if blocks are close enough to be related
+        is_nearby = abs(oy0 - y1) < 20 or abs(y0 - oy1) < 20  # Vertical proximity
+        if is_nearby:
+            nearby_blocks += 1
+        
+        # Check for vertical alignment (columns)
+        x_aligned = abs(x0 - ox0) < 5 or abs(x1 - ox1) < 5
+        if x_aligned and abs(y0 - oy0) < 50:  # Must be reasonably close vertically
+            vertical_alignments += 1
+        
+        # Check for horizontal alignment (rows)
+        y_aligned = abs(y0 - oy0) < 5 or abs(y1 - oy1) < 5
+        if y_aligned and abs(x0 - ox0) < 200:  # Must be reasonably close horizontally
+            horizontal_alignments += 1
+    
+    # Criteria for table cells:
+    # 1. Must have both vertical and horizontal alignments
+    # 2. Must have nearby blocks (tables are dense)
+    # 3. Text shouldn't be too long (table cells are usually concise)
+    return (vertical_alignments >= 1 and 
+            horizontal_alignments >= 1 and 
+            nearby_blocks >= 2 and 
+            text_length < 100)
+
+def display_page_with_highlights(uploaded_file, page_number):
+    # Create a PDF document object
+    doc = fitz.open(stream=uploaded_file.getvalue(), filetype="pdf")
+    
+    # Get the selected page
+    page = doc[page_number]
+    
+    # Get all text blocks (paragraphs)
+    blocks = page.get_text("blocks")
+    
+    # First pass: identify table blocks
+    table_blocks = []
+    for block in blocks:
+        if is_likely_table(blocks, block):
+            table_blocks.append(block)
+    
+    # Create table regions by merging nearby table blocks
+    table_regions = []
+    if table_blocks:
+        current_region = [table_blocks[0]]
+        for block in table_blocks[1:]:
+            x0, y0, x1, y1, _, _, _ = block
+            prev_x0, prev_y0, prev_x1, prev_y1, _, _, _ = current_region[-1]
+            
+            # If blocks are close, merge them into the same region
+            if (abs(y0 - prev_y1) < 20 or abs(x0 - prev_x1) < 20) and len(current_region) < 20:  # Limit region size
+                current_region.append(block)
+            else:
+                # Start a new region
+                if len(current_region) >= 3:  # Only keep regions with at least 3 blocks
+                    table_regions.append(current_region)
+                current_region = [block]
+        
+        if len(current_region) >= 3:  # Only keep regions with at least 3 blocks
+            table_regions.append(current_region)
+    
+    # Draw rectangles around table regions first
+    for region in table_regions:
+        if not region:
+            continue
+        # Get the bounding box of the entire region
+        x0 = min(block[0] for block in region)
+        y0 = min(block[1] for block in region)
+        x1 = max(block[2] for block in region)
+        y1 = max(block[3] for block in region)
+        
+        # Draw a rectangle with some padding
+        rect = fitz.Rect(x0-4, y0-4, x1+4, y1+4)
+        page.draw_rect(rect, color=(0, 0.5, 0), width=1.5)  # Green color, slightly thicker
+    
+    # Draw rectangles around non-table paragraphs
+    for block in blocks:
+        if block not in [b for region in table_regions for b in region]:
+            x0, y0, x1, y1, text, block_no, block_type = block
+            # Draw a rectangle with some padding
+            rect = fitz.Rect(x0-2, y0-2, x1+2, y1+2)
+            page.draw_rect(rect, color=(0, 0, 1), width=1)  # Blue color, 1pt width
+    
+    # Convert page to PNG image with higher resolution for better quality
+    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better resolution
+    
+    # Convert to bytes
+    img_bytes = pix.tobytes()
+    
+    # Convert to base64
+    base64_img = base64.b64encode(img_bytes).decode()
+    
+    # Create HTML for displaying the image
+    img_display = f'<img src="data:image/png;base64,{base64_img}" style="width: 100%; height: auto;">'
+    
+    doc.close()
+    return img_display
+
+def main():
+    st.title("PDF Viewer and Analyzer")
+    
+    # Initialize session state for page number if it doesn't exist
+    if 'page_number' not in st.session_state:
+        st.session_state.page_number = 0
+    
+    # File uploader
+    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+    
+    if uploaded_file is not None:
+        # Read PDF file
+        pdf_bytes = BytesIO(uploaded_file.read())
+        pdf_reader = PyPDF2.PdfReader(pdf_bytes)
+        total_pages = len(pdf_reader.pages)
+        
+        # Create two columns
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("PDF Preview")
+            
+            # Add legend for highlights
+            legend_col1, legend_col2 = st.columns(2)
+            with legend_col1:
+                st.markdown('<p style="color: blue; font-size: 0.8rem;">■ Paragraphs</p>', unsafe_allow_html=True)
+            with legend_col2:
+                st.markdown('<p style="color: green; font-size: 0.8rem;">■ Tables</p>', unsafe_allow_html=True)
+            
+            # Display current page with highlights
+            page_display = display_page_with_highlights(uploaded_file, st.session_state.page_number)
+            st.markdown(page_display, unsafe_allow_html=True)
+            
+            # Add some spacing
+            st.write("")
+            
+            # Navigation controls at the bottom with custom styling
+            nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
+            
+            # Custom CSS for the buttons and page number
+            st.markdown("""
+                <style>
+                    .stButton>button {
+                        padding: 0.2rem 1rem;
+                        min-height: 0px;
+                        height: 30px;
+                    }
+                    div[data-testid="column"] {
+                        text-align: center;
+                    }
+                    .page-number {
+                        font-size: 0.8rem;
+                        margin-top: 8px;
+                        color: #666;
+                    }
+                </style>
+            """, unsafe_allow_html=True)
+            
+            with nav_col1:
+                if st.button("←", key="prev_button", disabled=st.session_state.page_number <= 0):
+                    st.session_state.page_number -= 1
+                    st.rerun()
+            
+            with nav_col2:
+                st.markdown(f"<p class='page-number'>Page {st.session_state.page_number + 1} of {total_pages}</p>", unsafe_allow_html=True)
+            
+            with nav_col3:
+                if st.button("→", key="next_button", disabled=st.session_state.page_number >= total_pages - 1):
+                    st.session_state.page_number += 1
+                    st.rerun()
+        
+        with col2:
+            st.subheader("PDF Checks")
+            
+            # Perform basic checks
+            st.write("Basic PDF Information:")
+            st.write(f"- File name: {uploaded_file.name}")
+            st.write(f"- File size: {uploaded_file.size / 1024:.2f} KB")
+            st.write(f"- Number of pages: {total_pages}")
+            
+            # Check if PDF is encrypted
+            st.write(f"- Is encrypted: {pdf_reader.is_encrypted}")
+            
+            # Metadata information
+            st.write("\nMetadata:")
+            metadata = pdf_reader.metadata
+            if metadata:
+                for key, value in metadata.items():
+                    if value:
+                        st.write(f"- {key}: {value}")
+            else:
+                st.write("No metadata available")
+
+if __name__ == "__main__":
+    main() 
