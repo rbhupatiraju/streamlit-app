@@ -42,6 +42,8 @@ def display_page_with_highlights(uploaded_file, page_number):
     return img_display
 
 def main():
+    st.title("PDF Evaluator")
+
     # Initialize session state for page number if it doesn't exist
     if 'page_number' not in st.session_state:
         st.session_state.page_number = 0
@@ -66,7 +68,6 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("PDF Preview")
 
             current_page = st.session_state.page_number
             
@@ -112,34 +113,65 @@ def main():
                     st.rerun()
         
         with col2:
-            st.subheader("PDF Checks")
-
-            tab1, tab2, tab3, tab4 = st.tabs(["Document Structure", "Content Quality", "Visual Elements", "Formatting"])
-
-            # Add accordion sections with checklists
+            
+            # Create two tabs
+            tab1, tab2 = st.tabs(["Checks", "Chat"])
+            
             with tab1:
-                st.checkbox("Title page present")
-                st.checkbox("Table of contents included") 
-                st.checkbox("Page numbers consistent")
-                st.checkbox("Headers and footers consistent")
 
+                # Create nested tabs for different check categories
+                check_tab1, check_tab2, check_tab3, check_tab4 = st.tabs(["Document Structure", "Content Quality", "Visual Elements", "Formatting"])
+
+                # Add accordion sections with checklists
+                with check_tab1:
+                    st.checkbox("Title page present")
+                    st.checkbox("Table of contents included") 
+                    st.checkbox("Page numbers consistent")
+                    st.checkbox("Headers and footers consistent")
+
+                with check_tab2:
+                    st.checkbox("No spelling errors")
+                    st.checkbox("Grammar is correct")
+                    st.checkbox("Citations properly formatted")
+                    st.checkbox("References complete")
+
+                with check_tab3:
+                    st.checkbox("Images are clear")
+                    st.checkbox("Tables properly formatted")
+                    st.checkbox("Figures numbered correctly")
+                    st.checkbox("Captions present")
+
+                with check_tab4:
+                    st.checkbox("Font consistent")
+                    st.checkbox("Margins correct")
+                    st.checkbox("Line spacing uniform")
+                    st.checkbox("Paragraph alignment consistent")
+            
             with tab2:
-                st.checkbox("No spelling errors")
-                st.checkbox("Grammar is correct")
-                st.checkbox("Citations properly formatted")
-                st.checkbox("References complete")
-
-            with tab3:
-                st.checkbox("Images are clear")
-                st.checkbox("Tables properly formatted")
-                st.checkbox("Figures numbered correctly")
-                st.checkbox("Captions present")
-
-            with tab4:
-                st.checkbox("Font consistent")
-                st.checkbox("Margins correct")
-                st.checkbox("Line spacing uniform")
-                st.checkbox("Paragraph alignment consistent")
+                
+                # Initialize chat history in session state if it doesn't exist
+                if "messages" not in st.session_state:
+                    st.session_state.messages = []
+                
+                # Display chat messages
+                for message in st.session_state.messages:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
+                
+                # Chat input
+                if prompt := st.chat_input("Ask a question about the document"):
+                    # Add user message to chat history
+                    st.session_state.messages.append({"role": "user", "content": prompt})
+                    
+                    # Display user message
+                    with st.chat_message("user"):
+                        st.markdown(prompt)
+                    
+                    # Display assistant response
+                    with st.chat_message("assistant"):
+                        response = "I'm analyzing the document to answer your question..."
+                        st.markdown(response)
+                        st.session_state.messages.append({"role": "assistant", "content": response})
 
 if __name__ == "__main__":
     main() 
