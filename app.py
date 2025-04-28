@@ -33,10 +33,15 @@ def display_page_with_highlights(uploaded_file, page_number):
         # Get the page
         page = pdf[page_number]
         
-        # Render the page to a PIL image
-        image = page.render(
+        # Render the page to a bitmap
+        bitmap = page.render(
             scale=2,  # Higher scale for better quality
-        ).to_pil()
+            rotation=0,  # No rotation
+            crop=(0, 0, 0, 0),  # No cropping
+        )
+        
+        # Convert bitmap to PIL image
+        image = bitmap.to_pil()
         
         # Convert PIL image to bytes
         img_byte_arr = BytesIO()
